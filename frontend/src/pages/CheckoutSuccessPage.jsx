@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, ArrowRight, Loader2, Copy, Key, Receipt, Upload, Phone, Hash } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../lib/api";
@@ -20,6 +20,7 @@ export default function CheckoutSuccessPage() {
   const [paymentProofFile, setPaymentProofFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
 
   useEffect(() => {
     if (!orderId || !isAuthenticated) {
@@ -28,7 +29,12 @@ export default function CheckoutSuccessPage() {
     }
     api
       .get(`/checkout/orders/${orderId}`)
-      .then((r) => setData(r.data))
+      .then((r) => {
+        setData(r.data);
+        if (r.data.payment_info) {
+          setPaymentInfo(r.data.payment_info);
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
       
@@ -64,6 +70,11 @@ export default function CheckoutSuccessPage() {
         customer_phone: phone
       });
       setSubmitted(true);
+      setShowSuccessAnimation(true);
+      
+      setTimeout(() => {
+        setShowSuccessAnimation(false);
+      }, 3000);
       
       const orderRes = await api.get(`/checkout/orders/${orderId}`);
       setData(orderRes.data);
@@ -105,19 +116,50 @@ export default function CheckoutSuccessPage() {
               </div>
             )}
 
+            {/* Success Animation Overlay */}
+            <AnimatePresence>
+              {showSuccessAnimation && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+                >
+                  <div className="glass-strong rounded-3xl p-10 flex flex-col items-center gap-4">
+                    <motion.div
+                      initial={{ scale: 0, rotate: -180 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: "spring", stiffness: 200 }}
+                      className="h-24 w-24 rounded-full bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center"
+                    >
+                      <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+                    </motion.div>
+                    <h2 className="font-display text-2xl font-semibold text-slate-900">Payment Submitted!</h2>
+                    <p className="text-slate-600">We'll review your payment shortly.</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {(data?.order?.status === "pending" || paymentInfo) && !submitted && (
               <div className="mt-8 glass-strong rounded-2xl p-6 text-left border-2 border-amber-400/30">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display text-[18px] text-slate-900 font-medium">📱 Pay USDT using Trust Wallet</h2>
+                  <h2 className="font-display text-[18px] text-slate-900 font-medium">📱 Pay USDT (TRC20)</h2>
                 </div>
                 
                 <div className="grid md:grid-cols-2 gap-6 mb-6">
                   {/* QR Code Section */}
                   <div className="flex flex-col items-center justify-center">
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                      {paymentInfo?.binance_address ? (
+                      {paymentInfo?.binance_qr_image_url ? (
+                        <img 
+                          src={paymentInfo.binance_qr_image_url} 
+                          alt="USDT TRC20 QR Code" 
+                          className="h-[200px] w-[200px] object-contain"
+                        />
+                      ) : paymentInfo?.binance_qr_text || paymentInfo?.binance_address ? (
                         <QRCodeSVG
-                          value={paymentInfo.binance_address}
+                          value={paymentInfo.binance_qr_text || paymentInfo.binance_address}
                           size={200}
                           level="H"
                           includeMargin={true}
@@ -128,21 +170,21 @@ export default function CheckoutSuccessPage() {
                         </div>
                       )}
                     </div>
-                    <p className="mt-3 text-[13px] text-slate-600 text-center">Scan with Trust Wallet</p>
+                    <p className="mt-3 text-[13px] text-slate-600 text-center">Scan with Trust Wallet or any crypto wallet</p>
                     {paymentInfo?.binance_address && (
                       <div className="mt-2">
                         <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Network</p>
-                        <p className="text-[13px] text-slate-700 font-medium">TRC20 / BEP20 / ERC20</p>
+                        <p className="text-[13px] text-slate-700 font-medium">TRC20</p>
                       </div>
                     )}
                   </div>
                   
                   {/* Payment Instructions */}
                   <div className="space-y-4 text-[14px] text-slate-700">
-                    <p><strong>1.</strong> Open your Trust Wallet app</p>
-                    <p><strong>2.</strong> Send <span className="font-bold">${data?.order?.total.toFixed(2)}</span> USDT to this address:</p>
+                    <p><strong>1.</strong> Open your Trust Wallet or any crypto wallet</p>
+                    <p><strong>2.</strong> Send <span className="font-bold">${data?.order?.total.toFixed(2)}</span> USDT (TRC20) to this address:</p>
                     <div className="bg-slate-100 p-4 rounded-lg font-mono text-[12px] break-all border border-slate-200 flex items-center gap-3">
-                      <span className="flex-1">{paymentInfo?.binance_address || "Your Binance USDT address will be here"}</span>
+                      <span className="flex-1">{paymentInfo?.binance_address || "Your USDT TRC20 address will be here"}</span>
                       <button
                         onClick={() => copy(paymentInfo?.binance_address || "")}
                         className="shrink-0 text-blue-600 hover:text-blue-700 text-[12px] font-medium"
@@ -150,7 +192,7 @@ export default function CheckoutSuccessPage() {
                         {copiedKey === paymentInfo?.binance_address ? "Copied!" : "Copy"}
                       </button>
                     </div>
-                    <p><strong>3.</strong> After sending payment, click "I Have Paid" below</p>
+                    <p><strong>3.</strong> After sending payment, click "Done" below</p>
                     <p><strong>4.</strong> Your request will appear in admin dashboard for manual review</p>
                     <p><strong>5.</strong> Keep your transaction hash ready for verification</p>
                   </div>
@@ -208,13 +250,13 @@ export default function CheckoutSuccessPage() {
 
                     <button
                       onClick={handleSubmitPayment}
-                      disabled={submitting}
+                      disabled={submitting || !phone.trim() || !transactionHash.trim()}
                       className="btn-primary w-full justify-center"
                     >
                       {submitting ? (
                         <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Submitting...</>
                       ) : (
-                        "I Have Paid"
+                        "Done"
                       )}
                     </button>
                   </div>

@@ -1,5 +1,9 @@
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from .config import settings
+from core.config import settings
+import logging
+import certifi
+
+logger = logging.getLogger(__name__)
 
 _client: AsyncIOMotorClient | None = None
 
@@ -7,7 +11,21 @@ _client: AsyncIOMotorClient | None = None
 def get_client() -> AsyncIOMotorClient:
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(settings.MONGO_URL)
+        # Connection options optimized for MongoDB Atlas
+        client_options = {
+            "serverSelectionTimeoutMS": 5000,
+            "maxPoolSize": 50,
+            "minPoolSize": 5,
+            "maxIdleTimeMS": 30000,
+            "tlsCAFile": certifi.where()
+        }
+        if settings.MONGO_TLS:
+            client_options["tls"] = True
+            client_options["tlsAllowInvalidCertificates"] = False
+        _client = AsyncIOMotorClient(
+            settings.MONGO_URL,
+            **client_options
+        )
     return _client
 
 

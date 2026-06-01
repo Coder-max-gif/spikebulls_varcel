@@ -27,6 +27,9 @@ async def my_orders(user=Depends(get_current_user)):
             expires_at = processed_order["subscription_expires_at"]
             if isinstance(expires_at, str):
                 expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            # Make sure expires_at has timezone info (UTC)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if expires_at < now:
                 processed_order["status"] = "expired"
         

@@ -42,6 +42,13 @@ export function AuthProvider({ children }) {
     return res.data.user;
   };
 
+  const loginWithGoogle = async (code) => {
+    const res = await api.post("/auth/google/callback", { code });
+    setSession(res.data);
+    setUser(res.data.user);
+    return res.data.user;
+  };
+
   const register = async ({ name, email, password }) => {
     const res = await api.post("/auth/register", { name, email, password });
     setSession(res.data);
@@ -81,6 +88,7 @@ export function AuthProvider({ children }) {
 
   const value = {
     user,
+    setUser,
     loading,
     isAuthenticated: !!user,
     isAdmin: user?.role === "admin",
@@ -92,6 +100,7 @@ export function AuthProvider({ children }) {
     setup2FA,
     verify2FA,
     disable2FA,
+    loginWithGoogle,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

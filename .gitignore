@@ -6,9 +6,12 @@ venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/*.pyc
+backend/storage/
 
 # Frontend
 frontend/.env
+frontend/.env.local
+frontend/.env.production
 frontend/node_modules/
 frontend/build/
 frontend/.cache/
@@ -25,9 +28,16 @@ frontend/node_modules/.cache/default-development/6.pack
 -e 
 # Environment and credential files
 .env
-.env.*
-*.env
+.env.local
+.env.development
+.env.production
 credentials.json
 *.pem
 *.key
 .credentials
+
+# Allow example env files
+!.env.example
+!backend/.env.example
+!backend/.env.production.example
+!frontend/.env.example

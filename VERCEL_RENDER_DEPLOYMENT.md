@@ -1,15 +1,21 @@
 # SpikeBulls Production Deployment Guide
 
-## 📋 Deployment Stack
+## 📋 Deployment Stack Options
+### Option 1: Full Vercel Deployment
 - **Database**: MongoDB Atlas (Free M0 Cluster)
-- **Backend**: Render (Free Tier)
+- **Backend**: Vercel (Serverless Functions)
+- **Frontend**: Vercel (Free Tier)
+
+### Option 2: Vercel + Render (Recommended)
+- **Database**: MongoDB Atlas (Free M0 Cluster)
+- **Backend**: Render (Free Tier, persistent storage)
 - **Frontend**: Vercel (Free Tier)
 
 ---
 
 ## ✅ Deployment Checklist
 
-### Phase 1: MongoDB Atlas Setup
+### Phase 1: MongoDB Atlas Setup (Both Options)
 - [ ] Create MongoDB Atlas account
 - [ ] Launch M0 Sandbox Cluster (free)
 - [ ] Create database user
@@ -17,7 +23,18 @@
 - [ ] Get connection string
 - [ ] Test connection locally
 
-### Phase 2: Backend Deployment (Render)
+### Phase 2a: Backend Deployment (Vercel Serverless)
+- [ ] Sign up for Vercel account
+- [ ] Connect GitHub repo
+- [ ] Create new Project for backend:
+  - Root directory: `backend`
+  - Framework: Other
+- [ ] Add all environment variables (see `backend/.env.production.example`)
+- [ ] Deploy backend
+- [ ] Verify backend health at `/api/health`
+- ⚠️ Note: No persistent local storage on Vercel - use cloud storage (S3/Cloudinary) for files!
+
+### Phase 2b: Backend Deployment (Render)
 - [ ] Sign up for Render account
 - [ ] Connect GitHub repo
 - [ ] Create new Web Service
@@ -31,10 +48,9 @@
 - [ ] Verify backend health at `/api/health`
 
 ### Phase 3: Frontend Deployment (Vercel)
-- [ ] Sign up for Vercel account
-- [ ] Connect GitHub repo
-- [ ] Create new Project
-- [ ] Configure project settings:
+- [ ] Sign up for Vercel account (if not already done)
+- [ ] Connect GitHub repo (if not already done)
+- [ ] Create new Project for frontend:
   - Root directory: `frontend`
   - Framework: Create React App
 - [ ] Add environment variable: `REACT_APP_BACKEND_URL`
@@ -42,13 +58,13 @@
 - [ ] Verify frontend loads correctly
 
 ### Phase 4: Integration & Testing
-- [ ] Update `APP_URL` and `CORS_ORIGINS` in Render with Vercel URL
-- [ ] Update `REACT_APP_BACKEND_URL` in Vercel with Render URL
+- [ ] Update `APP_URL` and `CORS_ORIGINS` in backend with Vercel URL
+- [ ] Update `REACT_APP_BACKEND_URL` in Vercel with your backend URL
 - [ ] Test user registration/login
 - [ ] Test admin login
-- [ ] Test contact form (email should go to spikebulls108@gmail.com)
+- [ ] Test contact form
 - [ ] Test product pages
-- [ ] Verify manual Binance payment workflow (if applicable)
+- [ ] Verify manual Binance payment workflow
 - [ ] Test admin dashboard functionality
 
 ---
@@ -63,7 +79,18 @@
 5. Add `0.0.0.0/0` to Network Access
 6. Copy connection string (replace `<username>` and `<password>`)
 
-### 2. Backend Deployment on Render
+### 2a. Backend Deployment on Vercel
+1. Go to [vercel.com](https://vercel.com), sign up with GitHub
+2. Click **Add New…** → **Project**
+3. Import your repository
+4. Configure:
+   - Name: `spikebulls-backend`
+   - Root Directory: `backend`
+   - Framework Preset: Other
+5. Add Environment Variables (copy from `backend/.env.production.example`)
+6. Click **Deploy**
+
+### 2b. Backend Deployment on Render
 1. Go to [render.com](https://render.com), sign up with GitHub
 2. Click **New +** → **Web Service**
 3. Connect your repository
@@ -78,23 +105,25 @@
 6. Click **Create Web Service**
 
 ### 3. Frontend Deployment on Vercel
-1. Go to [vercel.com](https://vercel.com), sign up with GitHub
+1. Go to [vercel.com](https://vercel.com), sign up with GitHub (if needed)
 2. Click **Add New…** → **Project**
 3. Import your repository
 4. Configure:
+   - Name: `spikebulls-frontend`
    - Root Directory: `frontend`
    - Framework Preset: Create React App
 5. Add Environment Variable:
-   - `REACT_APP_BACKEND_URL`: Your Render backend URL (e.g., `https://spikebulls-backend.onrender.com`)
+   - `REACT_APP_BACKEND_URL`: Your backend URL (e.g., `https://spikebulls-backend.vercel.app` or Render URL)
 6. Click **Deploy**
 
 ---
 
 ## Environment Variables
 
-### Backend (Render)
+### Backend (Vercel or Render)
 Use `backend/.env.production.example` as template:
 - `MONGO_URL`: MongoDB Atlas connection string
+- `MONGO_TLS`: true (for MongoDB Atlas)
 - `DB_NAME`: spikebulls
 - `APP_URL`: Your Vercel frontend URL
 - `CORS_ORIGINS`: Your Vercel frontend URL
@@ -106,7 +135,8 @@ Use `backend/.env.production.example` as template:
 - `RESEND_API_KEY`: Your Resend API key
 
 ### Frontend (Vercel)
-- `REACT_APP_BACKEND_URL`: Your Render backend URL
+Use `frontend/.env.example` as template:
+- `REACT_APP_BACKEND_URL`: Your backend URL (Vercel or Render)
 
 ---
 
@@ -115,21 +145,13 @@ Use `backend/.env.production.example` as template:
 2. User receives Binance QR code/payment instructions
 3. User makes payment manually
 4. User uploads payment proof
-5. System creates "pending" order and stores:
-   - User details
-   - Payment proof
-   - Selected subscription duration
-   - Order status
-6. No automatic payment confirmation
-7. No automatic email sending
-8. No automatic license generation
-9. No automatic Discord invites
-10. From Admin Dashboard:
+5. System creates "pending" order
+6. From Admin Dashboard:
     - View pending orders
-    - Manually mark order as ACTIVE
-    - Update order status in database
-    - Generate license code manually
-    - Manually send product/license to user via email outside the system
+    - Mark order as ACTIVE
+    - Licenses are generated automatically
+    - Users receive welcome email with license keys
+    - Users can download files from their dashboard
 
 ---
 
@@ -147,9 +169,11 @@ Use `backend/.env.production.example` as template:
 ## 🎉 You're Done!
 Your SpikeBulls platform is now production-ready!
 
-## Files Created
+## Files Created/Updated
 - `backend/.env.production.example`: Backend environment variables template
+- `backend/vercel.json`: Vercel configuration for backend
+- `backend/api/index.py`: Vercel serverless function entry point
 - `frontend/vercel.json`: Vercel configuration
-- `frontend/.env.production.example`: Frontend environment variables template
+- `frontend/.env.example`: Frontend environment variables template
 - `VERCEL_RENDER_DEPLOYMENT.md`: This guide
 

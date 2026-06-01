@@ -32,7 +32,7 @@ class UserPublic(UserBase):
 
 class UserInDB(UserBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    password_hash: str
+    password_hash: str | None = None
     role: UserRole = "user"
     is_active: bool = True
     email_verified: bool = False
@@ -41,6 +41,7 @@ class UserInDB(UserBase):
     reset_token_expires: datetime | None = None
     two_factor_enabled: bool = False
     two_factor_secret: str | None = None
+    google_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

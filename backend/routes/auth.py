@@ -3,10 +3,13 @@ import secrets
 import io
 import base64
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import pyotp
 import qrcode
-from fastapi import APIRouter, Depends, HTTPException, status
+import requests
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr
 
 logger = logging.getLogger(__name__)
@@ -79,9 +82,9 @@ async def register(payload: UserCreate):
     )
     try:
         await send_email(
-            user.email,
-            "Welcome to SpikeBulls",
-            wrap_email("Welcome aboard", body, "Verify email", verify_url),
+            to=user.email,
+            subject="Welcome to SpikeBulls",
+            html=wrap_email("Welcome aboard", body, "Verify email", verify_url),
             meta={"type": "welcome"},
         )
     except Exception as e:
@@ -160,9 +163,9 @@ async def forgot_password(payload: EmailRequest):
         )
         try:
             await send_email(
-                user["email"],
-                "Reset your SpikeBulls password",
-                wrap_email("Password reset", body, "Reset password", reset_url),
+                to=user["email"],
+                subject="Reset your SpikeBulls password",
+                html=wrap_email("Password reset", body, "Reset password", reset_url),
                 meta={"type": "password_reset"},
             )
         except Exception as e:
@@ -273,8 +276,11 @@ async def disable_2fa(payload: TwoFADisableRequest, user=Depends(get_current_use
     if not user.get("two_factor_enabled"):
         raise HTTPException(status_code=400, detail="2FA not enabled")
 
-    if not verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid password")
+    # Check password only if user has a password (not a Google-only user)
+    if user.get("password_hash"):
+        if not verify_password(payload.password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Invalid password")
+    # If no password (Google user), no password check needed
 
     await db.users.update_one(
         {"id": user["id"]},
@@ -318,3 +324,165 @@ async def login_with_2fa(payload: LoginWith2FARequest):
             raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
     return _build_token_pair(user)
+
+
+# Google OAuth
+@router.get("/google/url")
+async def google_login_url():
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+    
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return {"auth_url": auth_url}
+
+
+@router.get("/google/callback", response_class=HTMLResponse)
+async def google_callback(request: Request, code: str = None, error: str = None):
+    if error:
+        html_content = f"""
+        <html>
+            <body>
+                <script>
+                    window.opener.postMessage({{ error: "{error}" }}, "*");
+                    window.close();
+                </script>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+    
+    # Exchange code for tokens
+    token_data = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+    }
+    token_response = requests.post(
+        "https://oauth2.googleapis.com/token", data=token_data
+    )
+    token_json = token_response.json()
+    if token_response.status_code != 200:
+        logger.error(f"Google token exchange failed: {token_json}")
+        html_content = """
+        <html>
+            <body>
+                <script>
+                    window.opener.postMessage({ error: "Failed to exchange code for tokens" }, "*");
+                    window.close();
+                </script>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    
+    # Get user info from Google
+    access_token = token_json["access_token"]
+    userinfo_response = requests.get(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    userinfo = userinfo_response.json()
+    if userinfo_response.status_code != 200:
+        logger.error(f"Failed to get Google user info: {userinfo}")
+        html_content = """
+        <html>
+            <body>
+                <script>
+                    window.opener.postMessage({ error: "Failed to get user info from Google" }, "*");
+                    window.close();
+                </script>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    
+    google_id = userinfo["sub"]
+    email = userinfo["email"].lower()
+    name = userinfo.get("name", email.split("@")[0])
+    email_verified = userinfo.get("email_verified", False)
+    
+    db = get_db()
+    
+    # Check if user exists with google_id or email
+    user = await db.users.find_one({"google_id": google_id})
+    if not user:
+        user = await db.users.find_one({"email": email})
+        if user:
+            # Link existing account with Google
+            await db.users.update_one(
+                {"email": email},
+                {"$set": {"google_id": google_id, "email_verified": email_verified, "updated_at": datetime.now(timezone.utc)}},
+            )
+            user = await db.users.find_one({"email": email})
+        else:
+            # Create new user with Google
+            new_user = UserInDB(
+                email=email,
+                name=name,
+                google_id=google_id,
+                email_verified=email_verified,
+            )
+            await db.users.insert_one(new_user.model_dump())
+            user = await db.users.find_one({"id": new_user.id})
+            
+            # Send welcome email for Google users
+            welcome_body = (
+                f"<p>Hi {name},</p>"
+                f"<p>Welcome to SpikeBulls! You've successfully signed up with Google.</p>"
+                f"<p>Your account is ready to use.</p>"
+            )
+            try:
+                await send_email(
+                    to=email,
+                    subject="Welcome to SpikeBulls",
+                    html=wrap_email("Welcome aboard", welcome_body, "Go to dashboard", f"{settings.APP_URL}/dashboard"),
+                    meta={"type": "welcome_google"},
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send welcome email to Google user: {e}")
+                pass
+    
+    if not user.get("is_active", True):
+        html_content = """
+        <html>
+            <body>
+                <script>
+                    window.opener.postMessage({ error: "Account disabled" }, "*");
+                    window.close();
+                </script>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    
+    token_pair = _build_token_pair(user)
+    
+    # Send token pair back to opener
+    html_content = f"""
+    <html>
+        <body>
+            <script>
+                window.opener.postMessage({{
+                    access_token: "{token_pair.access_token}",
+                    refresh_token: "{token_pair.refresh_token}",
+                    user: {token_pair.user.model_dump_json()}
+                }}, "*");
+                window.close();
+            </script>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)

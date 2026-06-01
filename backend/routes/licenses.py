@@ -49,7 +49,11 @@ async def activate_license(
     
     if license.get("expires_at"):
         expires_at = license["expires_at"]
-        if expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             await db.licenses.update_one(
                 {"id": license["id"]},
                 {"$set": {"status": "expired", "updated_at": datetime.now(timezone.utc)}}

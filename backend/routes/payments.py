@@ -80,16 +80,16 @@ async def _send_purchase_email(order: Order, products: list[dict], license_ids: 
         f"<code style='font-size:13px;color:#A5B4FC'>{lic['key']}</code></li>"
         for lic in lic_docs
     )
-    body = (
+    body_html = (
         "<p>Your SpikeBulls order is confirmed. Below are your license keys:</p>"
         f"<ul>{lines}</ul>"
         "<p>Find your downloads and license keys anytime in your dashboard.</p>"
     )
     try:
         await send_email(
-            order.user_email,
-            "Your SpikeBulls licenses are ready",
-            wrap_email("Order confirmed", body, "Open dashboard", f"{settings.APP_URL}/dashboard"),
+            to=order.user_email,
+            subject="Your SpikeBulls licenses are ready",
+            html=wrap_email("Order confirmed", body_html, "Open dashboard", f"{settings.APP_URL}/dashboard"),
             meta={"type": "purchase", "order_id": order.id},
         )
     except Exception:
@@ -114,7 +114,7 @@ async def upload_payment_proof(
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
     
-    return {"url": f"/storage/payment_proofs/{file_name}"}
+    return {"url": f"{settings.BACKEND_URL}/storage/payment_proofs/{file_name}"}
 
 
 @router.post("/binance/submit-payment")

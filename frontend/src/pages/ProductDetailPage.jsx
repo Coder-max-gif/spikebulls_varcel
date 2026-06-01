@@ -48,6 +48,8 @@ export default function ProductDetailPage() {
           order_id: result.order_id,
           payment_instructions: result.payment_instructions,
           binance_address: result.binance_address,
+          binance_qr_text: result.binance_qr_text,
+          binance_qr_image_url: result.binance_qr_image_url,
           binance_email: result.binance_email
         }));
         navigate(`/checkout/success?order_id=${result.order_id}`);

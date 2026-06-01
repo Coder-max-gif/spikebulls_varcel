@@ -178,11 +178,26 @@ function Licenses({ licenses }) {
 
 function LicenseRow({ lic, compact }) {
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const copy = () => {
     navigator.clipboard.writeText(lic.key);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+  
+  const handleDownload = async () => {
+    try {
+      setDownloading(true);
+      const res = await api.get(`/downloads/license/${lic.id}/token`);
+      window.location.href = `/api/downloads/license/${res.data.download_token}`;
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.detail || "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  };
+  
   const expired = lic.status !== "active";
   const expires = lic.expires_at ? new Date(lic.expires_at).toLocaleDateString() : "Lifetime";
   return (
@@ -190,11 +205,24 @@ function LicenseRow({ lic, compact }) {
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-4 justify-between">
         <div className="min-w-0 flex-1">
           <div className="text-[14.5px] text-slate-900 font-medium truncate">{lic.product_name}</div>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
             <code className="text-[11px] sm:text-[12px] text-blue-700 bg-slate-100 border border-slate-200 px-2 py-1 rounded-md break-all">{lic.key}</code>
             <button onClick={copy} className="h-7 w-7 flex-shrink-0 rounded-md glass flex items-center justify-center text-slate-600 hover:text-slate-900">
               {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
             </button>
+            {lic.file_path && (
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className="btn-primary !py-1.5 !px-3 !text-[12px] flex items-center gap-1.5"
+              >
+                {downloading ? (
+                  <><Loader2 className="h-3 w-3 animate-spin" /> Downloading...</>
+                ) : (
+                  <><Download className="h-3.5 w-3.5" /> Download File</>
+                )}
+              </button>
+            )}
           </div>
         </div>
         {!compact && (
@@ -283,6 +311,13 @@ function Account({ user, updateProfile, onLogout }) {
   const [twoFAQr, setTwoFAQr] = useState("");
   const [twoFACode, setTwoFACode] = useState("");
   const [disablePassword, setDisablePassword] = useState("");
+  const [hasPassword, setHasPassword] = useState(user?.has_password ?? true); // Assume true by default
+
+  // Check if user has a password (not a Google-only user)
+  useEffect(() => {
+    // We don't have a direct flag, but if user has google_id and no password set, they might not have a password
+    // For simplicity, we'll rely on the backend to handle it, but let's update the UI
+  }, [user]);
 
   const save = async (e) => {
     e.preventDefault();
@@ -332,6 +367,8 @@ function Account({ user, updateProfile, onLogout }) {
       alert(err.response?.data?.detail || "Invalid password");
     }
   };
+
+  const isGoogleUser = user?.google_id; // We don't have this in UserPublic, but we can assume if they have no password
 
   return (
     <div className="space-y-6">
@@ -402,13 +439,15 @@ function Account({ user, updateProfile, onLogout }) {
               <CheckCircle2 className="h-4 w-4" />
               <span className="text-[13px]">2FA is currently enabled</span>
             </div>
+            {/* Only show password field if user might have a password */}
             <div>
-              <label className="text-[12px] text-slate-600">Enter your password to disable 2FA</label>
+              <label className="text-[12px] text-slate-600">Enter your password to disable 2FA (optional for Google users)</label>
               <input
                 type="password"
                 className="mt-2 w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-[14px] text-slate-900 focus:outline-none focus:border-blue-400/50"
                 value={disablePassword}
                 onChange={(e) => setDisablePassword(e.target.value)}
+                placeholder="Leave empty if you signed up with Google"
               />
             </div>
             <button onClick={handleDisable2FA} className="btn-ghost !py-2.5 !text-rose-700 hover:!bg-rose-50">
@@ -424,16 +463,24 @@ function Account({ user, updateProfile, onLogout }) {
 function Downloads({ downloads }) {
   const [downloading, setDownloading] = useState({});
 
-  const handleDownload = async (productId) => {
+  const handleDownload = async (item) => {
     try {
-      setDownloading((prev) => ({ ...prev, [productId]: true }));
-      const res = await api.get(`/downloads/token/${productId}`);
-      window.location.href = `/api/downloads/${res.data.download_token}`;
+      const key = item.type === "license" ? item.license.id : item.product.id;
+      setDownloading((prev) => ({ ...prev, [key]: true }));
+      
+      if (item.type === "license") {
+        const res = await api.get(`/downloads/license/${item.license.id}/token`);
+        window.location.href = `/api/downloads/license/${res.data.download_token}`;
+      } else {
+        const res = await api.get(`/downloads/token/${item.product.id}`);
+        window.location.href = `/api/downloads/${res.data.download_token}`;
+      }
     } catch (err) {
       console.error(err);
       alert(err.response?.data?.detail || "Download failed");
     } finally {
-      setDownloading((prev) => ({ ...prev, [productId]: false }));
+      const key = item.type === "license" ? item.license.id : item.product.id;
+      setDownloading((prev) => ({ ...prev, [key]: false }));
     }
   };
 
@@ -443,41 +490,48 @@ function Downloads({ downloads }) {
 
   return (
     <ul className="space-y-2">
-      {downloads.map((item) => (
-        <li key={item.product.id} className="glass rounded-xl p-4">
-          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-4 justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="text-[14.5px] text-slate-900 font-medium truncate">{item.product.name}</div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3 text-[11.5px] sm:text-[12px] text-slate-600">
-                <span className="flex items-center gap-1 flex-shrink-0">
-                  <Download className="h-3.5 w-3.5" />
-                  {item.download_count}/{item.max_downloads} downloads used
-                </span>
-                <span className={`px-2 py-0.5 rounded-md flex-shrink-0 ${
-                  new Date(item.order.created_at)
-                    ? "bg-emerald-500/10 text-emerald-600"
-                    : "bg-zinc-500/10 text-slate-700"
-                }`}>
-                  Purchased {new Date(item.order.created_at).toLocaleDateString()}
-                </span>
+      {downloads.map((item) => {
+        const date = item.order?.created_at || item.license?.created_at;
+        const key = item.type === "license" ? item.license.id : item.product.id;
+        return (
+          <li key={key} className="glass rounded-xl p-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-4 justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] text-slate-900 font-medium truncate">
+                  {item.product?.name || "Product Download"}
+                  {item.type === "license" && <span className="text-xs text-blue-600 ml-2">(License File)</span>}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3 text-[11.5px] sm:text-[12px] text-slate-600">
+                  <span className="flex items-center gap-1 flex-shrink-0">
+                    <Download className="h-3.5 w-3.5" />
+                    {item.download_count}/{item.max_downloads} downloads used
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-md flex-shrink-0 ${
+                    date
+                      ? "bg-emerald-500/10 text-emerald-600"
+                      : "bg-zinc-500/10 text-slate-700"
+                  }`}>
+                    {date ? `Added ${new Date(date).toLocaleDateString()}` : "Access granted"}
+                  </span>
+                </div>
               </div>
+              <button
+                onClick={() => handleDownload(item)}
+                disabled={downloading[key] || item.download_count >= item.max_downloads}
+                className="btn-primary !py-2 !px-4 !text-[13px] flex items-center gap-2 w-full sm:w-auto justify-center"
+              >
+                {downloading[key] ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Downloading...</>
+                ) : item.download_count >= item.max_downloads ? (
+                  "Limit reached"
+                ) : (
+                  <><Download className="h-4 w-4" /> Download</>
+                )}
+              </button>
             </div>
-            <button
-              onClick={() => handleDownload(item.product.id)}
-              disabled={downloading[item.product.id] || item.download_count >= item.max_downloads}
-              className="btn-primary !py-2 !px-4 !text-[13px] flex items-center gap-2 w-full sm:w-auto justify-center"
-            >
-              {downloading[item.product.id] ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Downloading...</>
-              ) : item.download_count >= item.max_downloads ? (
-                "Limit reached"
-              ) : (
-                <><Download className="h-4 w-4" /> Download</>
-              )}
-            </button>
-          </div>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }

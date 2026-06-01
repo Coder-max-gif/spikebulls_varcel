@@ -71,16 +71,16 @@ async def _send_purchase_email(order: Order, products: list[dict], license_ids: 
         f"<code style='font-size:13px;color:#A5B4FC'>{lic['key']}</code></li>"
         for lic in lic_docs
     )
-    body = (
+    body_html = (
         "<p>Your SpikeBulls order is confirmed. Below are your license keys:</p>"
         f"<ul>{lines}</ul>"
         "<p>Find your downloads and license keys anytime in your dashboard.</p>"
     )
     try:
         await send_email(
-            order.user_email,
-            "Your SpikeBulls licenses are ready",
-            wrap_email("Order confirmed", body, "Open dashboard", f"{settings.APP_URL}/dashboard"),
+            to=order.user_email,
+            subject="Your SpikeBulls licenses are ready",
+            html=wrap_email("Order confirmed", body_html, "Open dashboard", f"{settings.APP_URL}/dashboard"),
             meta={"type": "purchase", "order_id": order.id},
         )
     except Exception:
@@ -128,6 +128,8 @@ async def create_checkout(payload: CheckoutCreate, user=Depends(get_current_user
         "checkout_url": f"{settings.APP_URL}/checkout/success?order_id={order.id}",
         "payment_instructions": settings.BINANCE_PAYMENT_INSTRUCTIONS,
         "binance_address": settings.BINANCE_PAY_ADDRESS,
+        "binance_qr_text": settings.BINANCE_QR_TEXT,
+        "binance_qr_image_url": settings.BINANCE_QR_IMAGE_URL,
         "binance_email": settings.BINANCE_PAY_EMAIL,
     }
 
@@ -144,7 +146,16 @@ async def get_order(order_id: str, user=Depends(get_current_user)):
     order.pop("_id", None)
     for lic in licenses:
         lic.pop("_id", None)
-    return {"order": order, "licenses": licenses}
+    return {
+        "order": order, 
+        "licenses": licenses,
+        "payment_info": {
+            "binance_address": settings.BINANCE_PAY_ADDRESS,
+            "binance_qr_text": settings.BINANCE_QR_TEXT,
+            "binance_qr_image_url": settings.BINANCE_QR_IMAGE_URL,
+            "payment_instructions": settings.BINANCE_PAYMENT_INSTRUCTIONS
+        }
+    }
 
 
 @router.post("/webhook")

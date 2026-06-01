@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
+import asyncio
 
 from .config import settings
 from .database import get_db
@@ -35,10 +36,10 @@ async def send_email(
     delivered = False
     try:
         if settings.EMAIL_PROVIDER == "smtp" and settings.SMTP_HOST and settings.SMTP_USER:
-            _send_smtp(to, subject, html, text)
+            await _send_smtp(to, subject, html, text)
             delivered = True
         elif settings.EMAIL_PROVIDER == "resend" and settings.RESEND_API_KEY:
-            delivered = _send_resend(to, subject, html, text)
+            delivered = await _send_resend(to, subject, html, text)
         else:
             logger.info("[EMAIL:console] to=%s subject=%s", to, subject)
             logger.info("--- BODY ---\n%s\n------------", text or _strip_html(html))
@@ -53,34 +54,39 @@ async def send_email(
     return delivered
 
 
-def _send_smtp(to: str, subject: str, html: str, text: str | None) -> None:
+async def _send_smtp(to: str, subject: str, html: str, text: str | None) -> None:
     msg = MIMEMultipart("alternative")
     msg["From"] = settings.EMAIL_FROM
     msg["To"] = to
     msg["Subject"] = subject
     msg.attach(MIMEText(text or _strip_html(html), "plain"))
     msg.attach(MIMEText(html, "html"))
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: _sync_send_smtp(msg, to))
+
+
+def _sync_send_smtp(msg, to):
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
         server.starttls()
         server.login(settings.SMTP_USER, settings.SMTP_PASS)
         server.sendmail(settings.SMTP_USER, [to], msg.as_string())
 
 
-def _send_resend(to: str, subject: str, html: str, text: str | None) -> bool:
-    import requests
+async def _send_resend(to: str, subject: str, html: str, text: str | None) -> bool:
+    import httpx
 
-    resp = requests.post(
-        "https://api.resend.com/emails",
-        headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}"},
-        json={
-            "from": settings.EMAIL_FROM,
-            "to": [to],
-            "subject": subject,
-            "html": html,
-            "text": text or _strip_html(html),
-        },
-        timeout=15,
-    )
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}"},
+            json={
+                "from": settings.EMAIL_FROM,
+                "to": [to],
+                "subject": subject,
+                "html": html,
+                "text": text or _strip_html(html),
+            },
+        )
     return resp.status_code < 300
 
 

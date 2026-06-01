@@ -1,23 +1,46 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import uuid
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr
 
+from core.config import settings
 from core.database import get_db
 from core.deps import get_current_admin
+from core.email import send_email, wrap_email
 from models.contact import Testimonial, TestimonialCreate
 from models.product import Product, ProductCreate, ProductUpdate
+from models.license import License, LicenseCreate
+from models.order import Order
 from services.seed import generate_license_key
+
+
+class SendEmailRequest(BaseModel):
+    to: EmailStr
+    subject: str
+    body: str
+
+
+class ManualLicenseCreate(BaseModel):
+    key: str | None = None  # if None, we'll generate one
+    user_id: str
+    user_email: str
+    product_id: str
+    product_name: str
+    order_id: str | None = None
+    status: str = "active"
+    expires_at: str | None = None  # ISO format
+    max_activations: int = 2
 
 STORAGE_DIR = Path(__file__).parent.parent / "storage"
 PRODUCT_IMAGES_DIR = STORAGE_DIR / "product-images"
 PRODUCTS_DIR = STORAGE_DIR / "products"
+LICENSES_DIR = STORAGE_DIR / "licenses"
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-ALLOWED_DOWNLOAD_TYPES = {"application/zip", "application/x-zip-compressed", "application/octet-stream"}
+ALLOWED_DOWNLOAD_EXTENSIONS = {".zip", ".ex5", ".mq5", ".ex4", ".mq4", ".bin", ".pdf", ".txt", ".json"}
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
@@ -133,18 +156,90 @@ async def admin_activate_order(order_id: str):
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be activated")
     
+    products = []
+    for item in order["items"]:
+        p = await db.products.find_one({"id": item["product_id"]})
+        if p:
+            products.append(p)
+    
+    order_obj = Order(**{k: v for k, v in order.items() if k != "_id"})
+    
+    # Grant licenses
+    license_ids = []
+    for prod in products:
+        duration = prod.get("subscription_tiers")
+        if duration and len(duration) > 0:
+            # Assume first tier or use subscription_duration from order
+            if order.get("subscription_duration"):
+                tier_duration = order["subscription_duration"]
+            else:
+                tier_duration = duration[0].get("license_duration_days", 30)
+        else:
+            tier_duration = prod.get("license_duration_days", 30)
+
+        expires_at = None
+        if tier_duration:
+            expires_at = datetime.now(timezone.utc) + timedelta(days=int(tier_duration))
+            
+        lic = License(
+            key=generate_license_key(),
+            user_id=order["user_id"],
+            user_email=order["user_email"],
+            product_id=prod["id"],
+            product_name=prod["name"],
+            order_id=order["id"],
+            expires_at=expires_at,
+        )
+        await db.licenses.insert_one(lic.model_dump())
+        license_ids.append(lic.id)
+    
+    # Calculate subscription duration
+    subscription_duration = None
+    if order.get("subscription_duration"):
+        subscription_duration = order["subscription_duration"]
+    else:
+        for prod in products:
+            if prod.get("subscription_tiers"):
+                subscription_duration = prod["subscription_tiers"][0].get("license_duration_days", 30)
+                break
+    if not subscription_duration:
+        subscription_duration = products[0].get("license_duration_days", 30) if products else 30
+    
     now = datetime.now(timezone.utc)
     updates = {
         "status": "active",
+        "license_ids": license_ids,
         "activated_at": now,
         "updated_at": now
     }
     
-    subscription_duration = order.get("subscription_duration")
     if subscription_duration:
-        updates["subscription_expires_at"] = now + timezone.timedelta(days=subscription_duration)
+        updates["subscription_expires_at"] = now + timedelta(days=subscription_duration)
     
     await db.orders.update_one({"id": order_id}, {"$set": updates})
+    
+    # Send purchase email
+    lic_docs = await db.licenses.find({"id": {"$in": license_ids}}).to_list(50)
+    lines = "".join(
+        f"<li><strong>{lic['product_name']}</strong><br>"
+        f"<code style='font-size:13px;color:#A5B4FC'>{lic['key']}</code></li>"
+        for lic in lic_docs
+    )
+    body_html = (
+        "<p>Your SpikeBulls order is confirmed. Below are your license keys:</p>"
+        f"<ul>{lines}</ul>"
+        "<p>Find your downloads and license keys anytime in your dashboard.</p>"
+    )
+    try:
+        await send_email(
+            to=order["user_email"],
+            subject="Your SpikeBulls licenses are ready",
+            html=wrap_email("Order confirmed", body_html, "Open dashboard", f"{settings.APP_URL}/dashboard"),
+            meta={"type": "purchase", "order_id": order["id"]},
+        )
+    except Exception:
+        pass
+    
     updated_order = await db.orders.find_one({"id": order_id})
     return _clean(updated_order)
 
@@ -210,6 +305,76 @@ async def admin_regenerate_license(license_id: str):
     return {"ok": True, "key": new_key}
 
 
+@router.post("/licenses")
+async def admin_create_license(payload: ManualLicenseCreate):
+    from datetime import datetime, timezone
+    db = get_db()
+
+    # Prepare the license data
+    license_data = {
+        "id": str(uuid.uuid4()),
+        "key": payload.key or generate_license_key(),
+        "user_id": payload.user_id,
+        "user_email": payload.user_email,
+        "product_id": payload.product_id,
+        "product_name": payload.product_name,
+        "order_id": payload.order_id,
+        "status": payload.status,
+        "activations": 0,
+        "max_activations": payload.max_activations,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    if payload.expires_at:
+        try:
+            license_data["expires_at"] = datetime.fromisoformat(payload.expires_at).astimezone(timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid expires_at format. Use ISO 8601 (e.g., 2025-12-31T23:59:59Z)")
+
+    # Insert the license into DB
+    await db.licenses.insert_one(license_data)
+
+    # Clean and return
+    license_data.pop("_id", None)
+    return _clean(license_data)
+
+
+@router.post("/licenses/{license_id}/upload")
+async def admin_upload_license_file(
+    license_id: str,
+    file: UploadFile = File(...)
+):
+    db = get_db()
+    license = await db.licenses.find_one({"id": license_id})
+    if not license:
+        raise HTTPException(status_code=404, detail="License not found")
+    
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Max {MAX_FILE_SIZE // (1024*1024)}MB")
+    
+    file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
+    if file_ext not in ALLOWED_DOWNLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed extensions: {', '.join(ALLOWED_DOWNLOAD_EXTENSIONS)}")
+    
+    unique_id = str(uuid.uuid4())[:8]
+    safe_filename = f"{unique_id}_{file.filename.replace(' ', '_') if file.filename else f'file{file_ext}'}"
+    LICENSES_DIR.mkdir(parents=True, exist_ok=True)
+    save_path = LICENSES_DIR / safe_filename
+    
+    with open(save_path, "wb") as f:
+        f.write(content)
+    
+    await db.licenses.update_one(
+        {"id": license_id},
+        {"$set": {"file_path": safe_filename, "updated_at": datetime.now(timezone.utc)}}
+    )
+    
+    updated_license = await db.licenses.find_one({"id": license_id})
+    return {"ok": True, "file_path": safe_filename, "license": _clean(updated_license)}
+
+
 # ---- Testimonials ----
 @router.get("/testimonials")
 async def admin_list_testimonials():
@@ -265,8 +430,8 @@ async def admin_upload_product_file(
         save_path = save_dir / safe_filename
         field_to_update = "images"
     else:
-        if file.content_type not in ALLOWED_DOWNLOAD_TYPES and not file_ext == ".zip":
-            raise HTTPException(status_code=400, detail=f"Invalid download type. Must be ZIP file")
+        if file_ext not in ALLOWED_DOWNLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Invalid download type. Allowed extensions: {', '.join(ALLOWED_DOWNLOAD_EXTENSIONS)}")
         save_dir = PRODUCTS_DIR
         save_path = save_dir / safe_filename
         field_to_update = "file_path"
@@ -296,3 +461,20 @@ async def admin_upload_product_file(
         "type": type,
         "product": _clean(updated_product)
     }
+
+
+# ---- Send Email ----
+@router.post("/send-email")
+async def admin_send_email(payload: SendEmailRequest):
+    try:
+        await send_email(
+            to=payload.to,
+            subject=payload.subject,
+            html=wrap_email(
+                title=payload.subject,
+                body_html=payload.body.replace("\n", "<br>")
+            ),
+        )
+        return {"ok": True, "message": "Email sent successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")

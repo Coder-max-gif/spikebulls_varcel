@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Pencil, Trash2, Loader2, X, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, X, Check, Upload } from "lucide-react";
 import { api } from "../../lib/api";
 
 const BLANK = {
@@ -116,7 +116,8 @@ function ProductDrawer({ initial, onClose, onSaved }) {
     images_text: (initial.images || []).join("\n"),
   }));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -125,25 +126,24 @@ function ProductDrawer({ initial, onClose, onSaved }) {
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
-    const payload = {
-      ...form,
-      features: form.features_text.split("\n").map((s) => s.trim()).filter(Boolean),
-      platforms: form.platforms_text.split(",").map((s) => s.trim()).filter(Boolean),
-      images: form.images_text.split("\n").map((s) => s.trim()).filter(Boolean),
-      price: parseFloat(form.price) || 0,
-      compare_at_price: form.compare_at_price ? parseFloat(form.compare_at_price) : null,
-      license_duration_days: form.license_duration_days ? parseInt(form.license_duration_days, 10) : null,
-      max_downloads: form.max_downloads ? parseInt(form.max_downloads, 10) : null,
-      file_path: form.file_path || null,
-    };
-    delete payload.features_text;
-    delete payload.platforms_text;
-    delete payload.images_text;
-    if (!payload.slug) payload.slug = slugify(payload.name);
-    if (!payload.badge) payload.badge = null;
-
     try {
+      const payload = {
+        ...form,
+        features: form.features_text.split("\n").map((s) => s.trim()).filter(Boolean),
+        platforms: form.platforms_text.split(",").map((s) => s.trim()).filter(Boolean),
+        images: form.images_text.split("\n").map((s) => s.trim()).filter(Boolean),
+        price: parseFloat(form.price) || 0,
+        compare_at_price: form.compare_at_price ? parseFloat(form.compare_at_price) : null,
+        license_duration_days: form.license_duration_days ? parseInt(form.license_duration_days, 10) : null,
+        max_downloads: form.max_downloads ? parseInt(form.max_downloads, 10) : null,
+        file_path: form.file_path || null,
+      };
+      delete payload.features_text;
+      delete payload.platforms_text;
+      delete payload.images_text;
+      if (!payload.slug) payload.slug = slugify(payload.name);
+      if (!payload.badge) payload.badge = null;
+
       if (initial.id) {
         delete payload.created_at;
         delete payload.updated_at;
@@ -154,9 +154,52 @@ function ProductDrawer({ initial, onClose, onSaved }) {
       }
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.detail || "Save failed");
+      alert(err.response?.data?.detail || "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUploadFile = async (e) => {
+    if (!e.target.files || !e.target.files[0] || !initial.id) return;
+    const file = e.target.files[0];
+    setUploadingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", "download");
+      const res = await api.post(`/admin/products/${initial.id}/upload`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      setForm(prev => ({ ...prev, file_path: res.data.file_path }));
+    } catch (err) {
+      alert(err.response?.data?.detail || "Failed to upload file");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleUploadImage = async (e) => {
+    if (!e.target.files || !e.target.files[0] || !initial.id) return;
+    const file = e.target.files[0];
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", "image");
+      const res = await api.post(`/admin/products/${initial.id}/upload`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      const newImages = [...form.images, res.data.file_path];
+      setForm(prev => ({ 
+        ...prev, 
+        images: newImages, 
+        images_text: newImages.join("\n") 
+      }));
+    } catch (err) {
+      alert(err.response?.data?.detail || "Failed to upload image");
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -173,7 +216,6 @@ function ProductDrawer({ initial, onClose, onSaved }) {
           <button onClick={onClose} className="h-8 w-8 rounded-md glass flex items-center justify-center"><X className="h-4 w-4" /></button>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
-          {error && <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-2 text-[13px] text-rose-700">{error}</div>}
           <Row><L label="Name"><Input v={form.name} on={(v) => set("name", v)} required /></L></Row>
           <Row><L label="Slug (URL)"><Input v={form.slug} on={(v) => set("slug", v)} placeholder="auto-generated if empty" /></L></Row>
           <div className="grid grid-cols-2 gap-3">
@@ -197,11 +239,41 @@ function ProductDrawer({ initial, onClose, onSaved }) {
             <L label="License days (blank = lifetime)"><Input type="number" v={form.license_duration_days || ""} on={(v) => set("license_duration_days", v)} /></L>
           </div>
           {form.delivery_type === "download" && (
-            <div className="grid grid-cols-2 gap-3">
-              <L label="File path (in storage/products/)"><Input v={form.file_path || ""} on={(v) => set("file_path", v)} placeholder="spikebulls-indicator.zip" /></L>
-              <L label="Max downloads"><Input type="number" v={form.max_downloads} on={(v) => set("max_downloads", v)} /></L>
+            <div className="space-y-4">
+            <div>
+              <Label htmlFor="product-file">Product File (Download) — Supported: .zip, .ex5, .mq5, .ex4, .mq4, .bin, .pdf, .txt, .json</Label>
+              <div className="flex gap-2 items-center mt-1">
+                <input
+                  id="product-file"
+                  type="file"
+                  accept=".zip,.ex5,.mq5,.ex4,.mq4,.bin,.pdf,.txt,.json"
+                  disabled={!initial.id || uploadingFile}
+                  onChange={handleUploadFile}
+                  className="text-[13px] text-slate-700 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+                {uploadingFile && <Loader2 className="h-4 w-4 animate-spin text-slate-500" />}
+              </div>
+              {form.file_path && (
+                <p className="mt-1 text-[12px] text-slate-600">Current file: {form.file_path}</p>
+              )}
             </div>
+            <L label="Max downloads"><Input type="number" v={form.max_downloads} on={(v) => set("max_downloads", v)} /></L>
+          </div>
           )}
+          <div>
+            <Label htmlFor="product-image">Product Images</Label>
+            <div className="flex gap-2 items-center mt-1">
+              <input
+                id="product-image"
+                type="file"
+                accept="image/*"
+                disabled={!initial.id || uploadingImage}
+                onChange={handleUploadImage}
+                className="text-[13px] text-slate-700 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+              {uploadingImage && <Loader2 className="h-4 w-4 animate-spin text-slate-500" />}
+            </div>
+          </div>
           <Row><L label="Features (one per line)"><Textarea v={form.features_text} on={(v) => set("features_text", v)} rows={5} /></L></Row>
           <Row><L label="Platforms (comma-separated)"><Input v={form.platforms_text} on={(v) => set("platforms_text", v)} placeholder="MetaTrader 5, VPS" /></L></Row>
           <Row><L label="Image URLs (one per line)"><Textarea v={form.images_text} on={(v) => set("images_text", v)} rows={3} placeholder="https://..." /></L></Row>
@@ -218,7 +290,7 @@ function ProductDrawer({ initial, onClose, onSaved }) {
 
           <div className="sticky bottom-0 -mx-6 mt-6 px-6 py-4 bg-white border-t border-slate-200 flex gap-2">
             <button disabled={saving} className="btn-primary flex-1">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Save</>}
+              {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> <span className="ml-2">Saving...</span></> : <><Check className="h-4 w-4" /> <span className="ml-2">Save</span></>}
             </button>
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
@@ -233,3 +305,4 @@ function L({ label, children }) { return <label className="block"><span classNam
 function Input({ v, on, type = "text", ...rest }) { return <input type={type} value={v ?? ""} onChange={(e) => on(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13.5px] text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-400/50" {...rest} />; }
 function Textarea({ v, on, rows, ...rest }) { return <textarea value={v} onChange={(e) => on(e.target.value)} rows={rows} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13.5px] text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-400/50 resize-none" {...rest} />; }
 function Select({ v, on, options }) { return <select value={v} onChange={(e) => on(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13.5px] text-slate-900 focus:outline-none focus:border-blue-400/50">{options.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>; }
+function Label({ children, ...rest }) { return <label className="text-[12px] text-slate-600 block" {...rest}>{children}</label>; }
