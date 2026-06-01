@@ -113,7 +113,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS - MUST BE FIRST BEFORE ROUTERS
-allow_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",")] if settings.CORS_ORIGINS != "*" else ["*"]
+allow_origins = settings.CORS_ORIGINS
 logger.info(f"CORS origins configured: {allow_origins}")
 app.add_middleware(
     CORSMiddleware,

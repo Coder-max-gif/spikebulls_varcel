@@ -12,7 +12,13 @@ class Settings:
     MONGO_URL: str = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
     DB_NAME: str = os.environ.get("DB_NAME", "spikebulls")
     MONGO_TLS: bool = os.environ.get("MONGO_TLS", "true").lower() == "true"
-    CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "*")
+    
+    @property
+    def CORS_ORIGINS(self):
+        origins_str = os.environ.get("CORS_ORIGINS", "*")
+        if origins_str == "*":
+            return ["*"]
+        return [origin.strip() for origin in origins_str.split(",")]
 
     # App
     APP_NAME: str = os.environ.get("APP_NAME", "SpikeBulls")
