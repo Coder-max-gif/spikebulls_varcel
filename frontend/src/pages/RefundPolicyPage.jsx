@@ -20,23 +20,51 @@ export default function RefundPolicyPage() {
 
       <section className="pb-20">
         <div className="mx-auto max-w-4xl px-5">
-          <div className="glass-strong rounded-2xl p-7 sm:p-9 space-y-6">
-            <div>
-              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">1. Refund Eligibility</h2>
-              <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
-                We offer a 14-day refund period for all digital products. If you're not satisfied with your purchase, contact us within 14 days for a full refund.
+          <div className="glass-strong rounded-2xl p-7 sm:p-9 space-y-8">
+            <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 px-4 py-3 mb-6">
+              <p className="text-[14px] text-rose-700 font-medium uppercase tracking-wider">
+                Strict No Refund Policy
               </p>
             </div>
+
             <div>
-              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">2. How to Request a Refund</h2>
+              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">1. All Sales Are Final</h2>
               <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
-                To request a refund, contact us at hello@spikebulls.com with your order details and reason for the refund.
+                Due to the digital nature of our products and services, all sales are final. Once a purchase is completed, no refunds, returns, or exchanges will be issued.
               </p>
             </div>
+
             <div>
-              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">3. Processing Refunds</h2>
+              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">2. Digital Products</h2>
               <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
-                Refunds are processed within 5–7 business days and credited back to your original payment method.
+                Our MT5 indicators, trading algorithms, and software are digital products that are delivered or activated immediately upon payment verification. Because these products cannot be "returned," they are non-refundable.
+              </p>
+            </div>
+
+            <div>
+              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">3. Subscription Fees</h2>
+              <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
+                All subscription fees (1 Month, 6 Months, or 1 Year plans) are non-refundable. If you choose to cancel your subscription, you will continue to have access until the end of your current billing period, but no partial refunds will be provided.
+              </p>
+            </div>
+
+            <div>
+              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">4. Crypto Payments</h2>
+              <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
+                Payments made via cryptocurrency (processed through Cryptomus or other manual methods) are non-refundable. Cryptocurrency transactions are irreversible by design, and we do not provide refunds for any crypto-based purchases.
+              </p>
+            </div>
+
+            <div>
+              <h2 className="font-display text-[20px] font-semibold tracking-tight text-slate-900">5. Legal Exceptions</h2>
+              <p className="mt-3 text-slate-600 text-[14px] leading-relaxed">
+                Exceptions to this no-refund policy apply only where required by applicable law in your jurisdiction.
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-slate-200">
+              <p className="text-slate-600 text-[14px] leading-relaxed italic">
+                By making a purchase on SpikeBulls, you acknowledge that you have read, understood, and agreed to this No Refund Policy.
               </p>
             </div>
           </div>

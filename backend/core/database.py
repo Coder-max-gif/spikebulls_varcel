@@ -17,11 +17,11 @@ def get_client() -> AsyncIOMotorClient:
             "maxPoolSize": 50,
             "minPoolSize": 5,
             "maxIdleTimeMS": 30000,
-            "tlsCAFile": certifi.where()
         }
         if settings.MONGO_TLS:
             client_options["tls"] = True
             client_options["tlsAllowInvalidCertificates"] = False
+            client_options["tlsCAFile"] = certifi.where()
         _client = AsyncIOMotorClient(
             settings.MONGO_URL,
             **client_options
